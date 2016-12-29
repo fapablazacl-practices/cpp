@@ -6,8 +6,14 @@
 #include <cassert>
 #include <vector>
 
-const std::vector<const char*> validationLayers = {
+const std::vector<const char*> enabledLayers = {
+#if defined(_DEBUG)
     "VK_LAYER_LUNARG_standard_validation"
+#endif
+};
+
+const std::vector<const char *> enabledExtensions = {
+    "VK_EXT_debug_report"
 };
 
 std::vector<VkLayerProperties> enumerateLayers() {
@@ -20,10 +26,6 @@ std::vector<VkLayerProperties> enumerateLayers() {
     return layers;   
 }
 
-bool checkLayers(const std::vector<VkLayerProperties> &layers, const std::vector<const char*> &) {
-    std::vector<VkLayerProperties> layers = enumerateLayers();
-}
-
 bool checkLayer(const std::vector<VkLayerProperties> &layers, const std::string &layerName) {    
     for (const VkLayerProperties &layer : layers) {
         if (layerName == layer.layerName) {
@@ -32,6 +34,138 @@ bool checkLayer(const std::vector<VkLayerProperties> &layers, const std::string 
     }    
     
     return false;
+}
+
+bool checkLayers(const std::vector<VkLayerProperties> &layers, const std::vector<const char*> &layerNames) {
+    for (const char *layerName : layerNames) {
+        if (!checkLayer(layers, layerName)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::vector<VkExtensionProperties> enumerateExtensions() {
+    std::uint32_t propertiesCount;
+    std::vector<VkExtensionProperties> properties;
+    
+    ::vkEnumerateInstanceExtensionProperties(nullptr, &propertiesCount, nullptr);
+    properties.resize(propertiesCount);
+    ::vkEnumerateInstanceExtensionProperties(nullptr, &propertiesCount, properties.data());
+
+    return properties;
+}
+
+VkApplicationInfo createApplicationInfo() {
+    VkApplicationInfo appInfo = {};
+    
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "Vulkan 01";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName = "N/A";
+    appInfo.engineVersion = VK_MAKE_VERSION(0, 0, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    return appInfo;
+}
+
+std::vector<const char *> getRequiredExtensions() {
+
+    // populate extensions
+    std::vector<const char *> extensions;
+
+    unsigned glfwExtensionCount = 0;
+    const char **glfwExtensions = ::glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+    for (unsigned i=0; i<glfwExtensionCount; i++) {
+        extensions.push_back(glfwExtensions[i]);
+    }
+
+    // append application required extensions
+    extensions.insert(extensions.end(), enabledExtensions.begin(), enabledExtensions.end());
+
+    return extensions;
+}
+
+VkInstanceCreateInfo createInstanceInfo(const VkApplicationInfo *appInfo, const std::vector<VkLayerProperties> &layers, const std::vector<const char *> &enableLayers, const std::vector<const char *> &enableExtensions) {
+    // initialize vulkan
+    VkInstanceCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = appInfo;
+    
+    createInfo.enabledExtensionCount = (std::uint32_t)enableExtensions.size();
+    createInfo.ppEnabledExtensionNames = enableExtensions.data();
+
+    if (checkLayers(layers, enableLayers)) {
+        createInfo.enabledLayerCount = (uint32_t)enableLayers.size();
+        createInfo.ppEnabledLayerNames = enableLayers.data();
+    }
+
+    return createInfo;
+}
+
+void displayInfo(const std::vector<VkExtensionProperties> &extensions, const std::vector<VkLayerProperties> &layers) {
+    // display extension info
+    std::cout << "Available extensions:" << std::endl;
+    
+    for (const VkExtensionProperties &property : extensions) {
+        std::cout << "\t" << property.extensionName << std::endl;
+    }
+    
+    // display available layer information 
+    std::cout << "Available layers:" << std::endl;
+
+    for (const VkLayerProperties &layer: layers) {
+        std::cout << "\t" << layer.layerName << std::endl;
+    }
+}
+
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+    VkDebugReportFlagsEXT flags, 
+    VkDebugReportObjectTypeEXT objectType, 
+    uint64_t object,
+    size_t location,
+    int32_t code,
+    const char *layerPrefix, 
+    const char *message, 
+    void *userData
+) {
+    std::cerr << "Validation Layer: " << message << std::endl;
+
+    return VK_FALSE;
+}
+
+VkResult CreateDebugReportCallbackEXT (
+    VkInstance instance, 
+    const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, 
+    const VkAllocationCallbacks* pAllocator, 
+    VkDebugReportCallbackEXT* pCallback) {
+
+    auto func = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+
+    if (func) {
+        return func(instance, pCreateInfo, pAllocator, pCallback);
+    } else {
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+}
+
+VkDebugReportCallbackEXT  setupDebug(VkInstance instance) {
+    VkDebugReportCallbackEXT  callback;
+
+    VkDebugReportCallbackCreateInfoEXT createInfo = {};
+
+    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+    createInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+    createInfo.pfnCallback = debugCallback;
+
+    VkResult result = CreateDebugReportCallbackEXT(instance, &createInfo, nullptr, &callback);
+
+    assert(result == VK_SUCCESS);
+
+    return callback;
 }
 
 int main() {
@@ -47,49 +181,21 @@ int main() {
     GLFWwindow* window = ::glfwCreateWindow(ScreenWidth, ScreenHeight, "Vulkan 01", nullptr, nullptr);
     assert(window);
 
-    // initialize vulkan
-    VkApplicationInfo appInfo = {};
-    
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Vulkan 01";
-    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "N/A";
-    appInfo.engineVersion = VK_MAKE_VERSION(0, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_0;
-    
-    VkInstanceCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-    
-    unsigned extensionCount = 0;
-    const char **extensions = ::glfwGetRequiredInstanceExtensions(&extensionCount);
-    
-    createInfo.enabledExtensionCount = extensionCount;
-    createInfo.ppEnabledExtensionNames = extensions;
-    
+    const auto extensions = enumerateExtensions();
+    const auto layers = enumerateLayers();
+
+    displayInfo(extensions, layers);
+
     // create vulkan instance
+    auto requiredExtensions = getRequiredExtensions();
+
+    VkApplicationInfo appInfo = ::createApplicationInfo();
+    VkInstanceCreateInfo instanceInfo = ::createInstanceInfo(&appInfo, layers, enabledLayers, requiredExtensions);
+
     VkInstance instance;
-    VkResult result = ::vkCreateInstance(&createInfo, nullptr, &instance);
+    VkResult result = ::vkCreateInstance(&instanceInfo, nullptr, &instance);
     
     assert(result == VK_SUCCESS);
-    
-    // enumerate available extension properties
-    std::uint32_t propertiesCount;
-    std::vector<VkExtensionProperties> properties;
-    
-    ::vkEnumerateInstanceExtensionProperties(nullptr, &propertiesCount, nullptr);
-    properties.resize(propertiesCount);
-    ::vkEnumerateInstanceExtensionProperties(nullptr, &propertiesCount, properties.data());
-    
-    // display info 
-    for (const VkExtensionProperties &property : properties) {
-        std::cout << "\t" << property.extensionName << std::endl;
-    }
-    
-    // check for validation layers
-    if (checkLayer(ValidationLayer)) {
-        
-    }
     
     while (!::glfwWindowShouldClose(window)) {
         ::glfwPollEvents();
