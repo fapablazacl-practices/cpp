@@ -9,6 +9,7 @@ set (CMAKE_CXX_STANDARD 11)
 
 #add_subdirectory(lazy)
 #add_subdirectory(d3d11_sample01)
+add_subdirectory(Proto01)
 add_subdirectory(ExpressionTemplates01)
 add_subdirectory(ExpressionTemplates02)
 #add_subdirectory(ProceduralTexture01)
